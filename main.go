@@ -10,10 +10,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// Variables used for command line parameters
-var (
-	token string
-)
+var token string
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
@@ -45,22 +42,30 @@ func main() {
 	<-sc
 }
 
-// This function will be called (due to AddHandler above) every time a new
+/* Notation
+ *
+**/
+func toChessNotation(chat string) []string {
+	var notation_list []string
+	return notation_list
+}
+
 // message is created on any channel that the authenticated bot has access to.
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	// Ignore all messages created by the bot itself
-	// This isn't required in this specific example but it's a good practice.
 	if m.Author.ID == s.State.User.ID {
 		return
 	}
+
+	// fmt.Println(m.Content)
 	// If the message is "ping" reply with "Pong!"
-	if m.Content == "ping" {
+	if m.Content == "!ping" {
 		s.ChannelMessageSend(m.ChannelID, "Pong!")
 	}
 
 	// If the message is "pong" reply with "Ping!"
-	if m.Content == "pong" {
+	if m.Content == "!pong" {
 		s.ChannelMessageSend(m.ChannelID, "Ping!")
 	}
 }
