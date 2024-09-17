@@ -5,12 +5,18 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	hunsuChess "hunsuChess/chess"
+
 	"github.com/bwmarrin/discordgo"
+	"github.com/notnil/chess"
 )
 
 var token string
+
+var games map[string]*chess.Game = make(map[string]*chess.Game)
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
@@ -45,8 +51,14 @@ func main() {
 /* Notation
  *
 **/
-func toChessNotation(chat string) []string {
+func toChessNotation(game *chess.Game, chat string) []string {
 	var notation_list []string
+	// moves := game.ValidMoves()
+	if err := game.MoveStr(chat); err != nil {
+		fmt.Println("Error")
+		return []string{}
+	}
+
 	return notation_list
 }
 
@@ -58,14 +70,33 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	// fmt.Println(m.Content)
-	// If the message is "ping" reply with "Pong!"
-	if m.Content == "!ping" {
-		s.ChannelMessageSend(m.ChannelID, "Pong!")
-	}
+	if m.Content == "!singleGame" {
+		if games[m.ChannelID] != nil {
+			s.ChannelMessage(m.ChannelID, "game is already exists")
+			return
+		}
+		game := chess.NewGame()
 
-	// If the message is "pong" reply with "Ping!"
-	if m.Content == "!pong" {
-		s.ChannelMessageSend(m.ChannelID, "Ping!")
+		games[m.ChannelID] = game
+
+		file := hunsuChess.ChessImage(game.FEN())
+
+		_, err := s.ChannelFileSend(m.ChannelID, "test.png", file)
+		if err != nil {
+			panic(err)
+		}
+	} else if strings.HasPrefix(m.Content, "!") {
+		if games[m.ChannelID] == nil {
+			return
+		}
+		game := games[m.ChannelID]
+		toChessNotation(game, m.Content[1:])
+
+		file := hunsuChess.ChessImage(game.FEN())
+
+		_, err := s.ChannelFileSend(m.ChannelID, "test.png", file)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
