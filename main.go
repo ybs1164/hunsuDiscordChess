@@ -16,7 +16,22 @@ import (
 
 var token string
 
-var games map[string]*chess.Game = make(map[string]*chess.Game)
+type Game struct {
+	game         *chess.Game
+	whitePlayers []Player
+	blackPlayers []Player
+}
+
+func (game *Game) VoteMove(id string, chat []string) {
+
+}
+
+type Player struct {
+	id   string
+	move string
+}
+
+var games map[string]*Game = make(map[string]*Game)
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
@@ -48,18 +63,24 @@ func main() {
 	<-sc
 }
 
-/* Notation
- *
-**/
-func toChessNotation(game *chess.Game, chat string) []string {
-	var notation_list []string
-	// moves := game.ValidMoves()
-	if err := game.MoveStr(chat); err != nil {
-		fmt.Println("Error")
-		return []string{}
+func MoveChess(game *chess.Game, chat []string) {
+	moves := game.ValidMoves()
+	if len(chat) == 1 {
+		// TODO : read PGN
+		for _, move := range moves {
+			if move.String() != chat[0] {
+				continue
+			}
+			game.MoveStr(chat[0])
+		}
+	} else if len(chat) == 2 {
+		// TODO : vote move
+		for _, move := range moves {
+			if move.S1().String() == chat[0] && move.S2().String() == chat[1] {
+				game.Move(move)
+			}
+		}
 	}
-
-	return notation_list
 }
 
 // message is created on any channel that the authenticated bot has access to.
@@ -70,29 +91,34 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if m.Content == "!singleGame" {
+	if m.Content == "!gameSet" {
 		if games[m.ChannelID] != nil {
 			s.ChannelMessage(m.ChannelID, "game is already exists")
 			return
 		}
 		game := chess.NewGame()
 
-		games[m.ChannelID] = game
+		games[m.ChannelID] = &Game{
+			game: game,
+		}
 
-		file := hunsuChess.ChessImage(game.FEN())
+		file := hunsuChess.ChessImage(game.FEN(), []string{"e2e4", "d2d4", "b1c3"})
 
 		_, err := s.ChannelFileSend(m.ChannelID, "test.png", file)
 		if err != nil {
 			panic(err)
 		}
-	} else if strings.HasPrefix(m.Content, "!") {
+	} else if strings.HasPrefix(m.Content, "!move") {
 		if games[m.ChannelID] == nil {
 			return
 		}
 		game := games[m.ChannelID]
-		toChessNotation(game, m.Content[1:])
+		arguments := strings.Split(m.Content, " ")
+		notations := arguments[1:]
 
-		file := hunsuChess.ChessImage(game.FEN())
+		MoveChess(game.game, notations)
+
+		file := hunsuChess.ChessImage(game.game.FEN(), []string{})
 
 		_, err := s.ChannelFileSend(m.ChannelID, "test.png", file)
 		if err != nil {
