@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	hunsuChess "hunsuChess/chess"
 
@@ -18,20 +21,109 @@ var token string
 
 type Game struct {
 	game         *chess.Game
-	whitePlayers []Player
-	blackPlayers []Player
+	whitePlayers map[string]*Player
+	blackPlayers map[string]*Player
+	turn         bool // false : white, true : black
+
+	nextTime time.Time
+
+	recentMove string
 }
 
-func (game *Game) VoteMove(id string, chat []string) {
+func (game *Game) VoteMove(id string, chat string) error {
+	var players map[string]*Player
 
+	if !game.turn {
+		players = game.whitePlayers
+	} else {
+		players = game.blackPlayers
+	}
+
+	if _, ok := players[id]; !ok {
+		return errors.New("Not joined game")
+	}
+
+	for _, move := range game.game.ValidMoves() {
+		if chat == move.String() {
+			player := players[id]
+
+			player.move = chat
+
+			return nil
+		}
+	}
+
+	return errors.New("Invalid move")
+}
+
+func (game *Game) GetVotes() []string {
+	var players map[string]*Player
+
+	moves := []string{}
+
+	if !game.turn {
+		players = game.whitePlayers
+	} else {
+		players = game.blackPlayers
+	}
+
+	for _, player := range players {
+		if player.move == "" {
+			continue
+		}
+		moves = append(moves, player.move)
+	}
+
+	return moves
+}
+
+func (game *Game) Next() {
+	var players map[string]*Player
+
+	movesCount := make(map[string]int)
+
+	var move string
+	var maxCount int = 0
+
+	if !game.turn {
+		players = game.whitePlayers
+	} else {
+		players = game.blackPlayers
+	}
+
+	for _, player := range players {
+		movesCount[player.move] += 1
+		player.move = ""
+	}
+
+	for m, c := range movesCount {
+		if maxCount < c {
+			move = m
+			maxCount = movesCount[m]
+		}
+	}
+
+	if maxCount == 0 {
+		validMoves := game.game.ValidMoves()
+		game.recentMove = validMoves[rand.Intn(len(validMoves))].String()
+	} else {
+		game.recentMove = move
+	}
+
+	m, _ := chess.UCINotation{}.Decode(game.game.Position(), game.recentMove)
+
+	game.game.Move(m)
 }
 
 type Player struct {
-	id   string
 	move string
 }
 
-var games map[string]*Game = make(map[string]*Game)
+var game *Game = &Game{
+	game:         chess.NewGame(),
+	whitePlayers: map[string]*Player{},
+	blackPlayers: map[string]*Player{},
+}
 
 func init() {
 	flag.StringVar(&token, "t", "", "Bot Token")
@@ -45,6 +137,8 @@ func main() {
 		fmt.Printf("err by session create : %v", err)
 		return
 	}
+
+	go DayCycle()
 
 	session.AddHandler(messageCreate)
 
@@ -63,23 +157,16 @@ func main() {
 	<-sc
 }
 
-func MoveChess(game *chess.Game, chat []string) {
-	moves := game.ValidMoves()
-	if len(chat) == 1 {
-		// TODO : read PGN
-		for _, move := range moves {
-			if move.String() != chat[0] {
-				continue
-			}
-			game.MoveStr(chat[0])
-		}
-	} else if len(chat) == 2 {
-		// TODO : vote move
-		for _, move := range moves {
-			if move.S1().String() == chat[0] && move.S2().String() == chat[1] {
-				game.Move(move)
-			}
-		}
+func DayCycle() {
+	for {
+		now := time.Now().AddDate(0, 0, 1)
+		year, month, day := now.Date()
+
+		game.nextTime = time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+
+		<-time.After(time.Until(game.nextTime))
+
+		game.Next()
 	}
 }
 
@@ -91,36 +178,56 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	if m.Content == "!gameSet" {
-		if games[m.ChannelID] != nil {
-			s.ChannelMessage(m.ChannelID, "game is already exists")
-			return
-		}
-		game := chess.NewGame()
+	if m.Content == "!game" {
+		file := hunsuChess.ChessImage(game.game.FEN(), game.GetVotes())
 
-		games[m.ChannelID] = &Game{
-			game: game,
-		}
-
-		file := hunsuChess.ChessImage(game.FEN(), []string{"e2e4", "d2d4", "b1c3"})
-
-		_, err := s.ChannelFileSend(m.ChannelID, "test.png", file)
+		_, err := s.ChannelFileSendWithMessage(m.ChannelID, "하루가 지나갈 때 턴이 넘어갑니다.", "chess.png", file)
 		if err != nil {
 			panic(err)
 		}
-	} else if strings.HasPrefix(m.Content, "!move") {
-		if games[m.ChannelID] == nil {
+	} else if m.Content == "!white" {
+		if _, ok := game.whitePlayers[m.Author.ID]; ok {
+			s.ChannelMessageSend(m.ChannelID, "already joined")
 			return
 		}
-		game := games[m.ChannelID]
+		if _, ok := game.blackPlayers[m.Author.ID]; ok {
+			s.ChannelMessageSend(m.ChannelID, "already joined")
+			return
+		}
+
+		game.whitePlayers[m.Author.ID] = &Player{
+			move: "",
+		}
+
+		s.ChannelMessageSend(m.ChannelID, string(m.Author.Username)+" join white team")
+	} else if m.Content == "!black" {
+		if _, ok := game.whitePlayers[m.Author.ID]; ok {
+			s.ChannelMessageSend(m.ChannelID, "already joined")
+			return
+		}
+		if _, ok := game.blackPlayers[m.Author.ID]; ok {
+			s.ChannelMessageSend(m.ChannelID, "already joined")
+			return
+		}
+
+		game.blackPlayers[m.Author.ID] = &Player{
+			move: "",
+		}
+
+		s.ChannelMessageSend(m.ChannelID, string(m.Author.Username)+" join black team")
+	} else if strings.HasPrefix(m.Content, "!move") {
 		arguments := strings.Split(m.Content, " ")
 		notations := arguments[1:]
 
-		MoveChess(game.game, notations)
+		err := game.VoteMove(m.Author.ID, strings.Join(notations, ""))
 
-		file := hunsuChess.ChessImage(game.game.FEN(), []string{})
+		if err != nil {
+			fmt.Printf("%v\n", err)
+		}
 
-		_, err := s.ChannelFileSend(m.ChannelID, "test.png", file)
+		file := hunsuChess.ChessImage(game.game.FEN(), game.GetVotes())
+
+		_, err = s.ChannelFileSend(m.ChannelID, "test.png", file)
 		if err != nil {
 			panic(err)
 		}
