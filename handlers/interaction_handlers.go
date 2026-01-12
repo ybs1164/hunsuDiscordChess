@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"hunsuChess/chess"
 	"hunsuChess/game"
@@ -107,11 +108,41 @@ func (h *InteractionHandler) handleHelpCommand(s *discordgo.Session, i *discordg
 }
 
 func (h *InteractionHandler) handleGameCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var message string
+
 	if h.Game.IsGameOver() {
-		h.Game.Reset()
+		outcome := h.Game.ChessGame.Outcome()
+		method := h.Game.ChessGame.Method()
+		var result string
+		switch outcome {
+		case notnilchess.WhiteWon:
+			result = "백팀이 승리했습니다!"
+		case notnilchess.BlackWon:
+			result = "흑팀이 승리했습니다!"
+		case notnilchess.Draw:
+			result = "무승부입니다!"
+		}
+
+		message = fmt.Sprintf("게임 종료! %s (%s)\n`/game` 명령어로 새 게임을 시작할 수 있습니다.", result, method.String())
+	} else {
+		now := time.Now()
+		duration := h.Game.NextTime.Sub(now)
+		hours := int(duration.Hours())
+		minutes := int(duration.Minutes()) % 60
+		seconds := int(duration.Seconds()) % 60
+
+		message = fmt.Sprintf("턴이 넘어갈 때까지 %d시간 %d분 %d초 남았습니다.\n\n%s", hours, minutes, seconds, h.Game.GetTopNVotes(3))
 	}
 
-	if errMsg := CheckPlayer(h.Game, i.Member.User.ID); errMsg != "" {
+	var User *discordgo.User
+
+	if i.Member == nil {
+		User = i.User
+	} else {
+		User = i.Member.User
+	}
+
+	if errMsg := CheckPlayer(h.Game, User.ID); errMsg != "" {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -122,7 +153,7 @@ func (h *InteractionHandler) handleGameCommand(s *discordgo.Session, i *discordg
 		return
 	}
 
-	team, _ := h.Game.GetPlayerTeam(i.Member.User.ID)
+	team, _ := h.Game.GetPlayerTeam(User.ID)
 	fen := h.Game.ChessGame.FEN()
 	if team == "black" {
 		parts := strings.Split(fen, " ")
@@ -135,7 +166,6 @@ func (h *InteractionHandler) handleGameCommand(s *discordgo.Session, i *discordg
 	}
 
 	file := chess.ChessImage(fen, h.Game.GetVotes(), team)
-	message := fmt.Sprintf("하루가 지나갈 때 턴이 넘어갑니다.\n\n%s", h.Game.GetTopNVotes(3))
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -153,38 +183,33 @@ func (h *InteractionHandler) handleGameCommand(s *discordgo.Session, i *discordg
 }
 
 func (h *InteractionHandler) handleJoinCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	member, err := s.GuildMember(i.GuildID, i.Member.User.ID)
-	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "멤버 정보를 가져오는 중 오류가 발생했습니다.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
+	var User *discordgo.User
+
+	if i.Member == nil {
+		User = i.User
+	} else {
+		User = i.Member.User
 	}
 
 	// As direct Nitro detection (PremiumType) is unreliable, we check for features that require Nitro,
 	// such as server boosting, animated avatar, banner, or avatar decoration.
-	isPremium := (member.PremiumSince != nil) ||
-		(member.User != nil && (strings.HasPrefix(member.User.Avatar, "a_") || member.User.Banner != ""))
+	isPremium := User.PremiumType > 0
 
 	if isPremium {
-		h.Game.AddWhitePlayer(i.Member.User.ID)
+		h.Game.AddWhitePlayer(User.ID)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("%s님이 백팀에 참여했습니다.", i.Member.User.Username),
+				Content: fmt.Sprintf("%s님이 백팀에 참여했습니다.", User.Username),
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 	} else {
-		h.Game.AddBlackPlayer(i.Member.User.ID)
+		h.Game.AddBlackPlayer(User.ID)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("%s님이 흑팀에 참여했습니다.", i.Member.User.Username),
+				Content: fmt.Sprintf("%s님이 흑팀에 참여했습니다.", User.Username),
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -201,7 +226,15 @@ func (h *InteractionHandler) handleMoveCommand(s *discordgo.Session, i *discordg
 		}
 	}
 
-	if errMsg := CheckPlayerAndTurn(h.Game, i.Member.User.ID); errMsg != "" {
+	var User *discordgo.User
+
+	if i.Member == nil {
+		User = i.User
+	} else {
+		User = i.Member.User
+	}
+
+	if errMsg := CheckPlayerAndTurn(h.Game, User.ID); errMsg != "" {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
@@ -214,7 +247,7 @@ func (h *InteractionHandler) handleMoveCommand(s *discordgo.Session, i *discordg
 
 	if moveUCI != "" {
 		// If move_uci is provided, attempt to vote for it
-		err := h.Game.VoteMove(i.Member.User.ID, moveUCI)
+		err := h.Game.VoteMove(User.ID, moveUCI)
 		if err != nil {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -228,14 +261,14 @@ func (h *InteractionHandler) handleMoveCommand(s *discordgo.Session, i *discordg
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("%s님이 **%s**에 투표했습니다.", i.Member.User.Username, moveUCI),
+				Content: fmt.Sprintf("%s님이 **%s**에 투표했습니다.", User.Username, moveUCI),
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 	} else {
 		// If no move_uci, display the initial move embed
-		team, _ := h.Game.GetPlayerTeam(i.Member.User.ID)
-		messageToSend, err := chess.CreateInitialMoveEmbed(h.Game.ChessGame, i.Member.User.ID, team, true)
+		team, _ := h.Game.GetPlayerTeam(User.ID)
+		messageToSend, err := chess.CreateInitialMoveEmbed(h.Game.ChessGame, User.ID, team, true)
 		if err != nil {
 			fmt.Printf("Error creating initial move embed: %v\n", err)
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -321,57 +354,15 @@ func (h *InteractionHandler) handleSkipCommand(s *discordgo.Session, i *discordg
 	}
 }
 
-func (h *InteractionHandler) handleVoteCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	options := i.ApplicationCommandData().Options
-	var moveUCI string
-	for _, opt := range options {
-		if opt.Name == "move_uci" {
-			moveUCI = opt.StringValue()
-			break
-		}
-	}
-
-	if errMsg := CheckPlayerAndTurn(h.Game, i.Member.User.ID); errMsg != "" {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: errMsg,
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
-
-	err := h.Game.VoteMove(i.Member.User.ID, moveUCI)
-	if err != nil {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: fmt.Sprintf("잘못된 수: `%s`. `/move`를 사용하여 가능한 수를 확인하세요.", moveUCI),
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
-
-	move, err := notnilchess.UCINotation{}.Decode(h.Game.ChessGame.Position(), moveUCI)
-	var san string
-	if err != nil {
-		san = moveUCI
-	} else {
-		san = notnilchess.AlgebraicNotation{}.Encode(h.Game.ChessGame.Position(), move)
-	}
-
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: fmt.Sprintf("%s님이 **%s**에 투표했습니다.", i.Member.User.Username, san),
-			Flags:   discordgo.MessageFlagsEphemeral,
-		},
-	})
-}
-
 func (h *InteractionHandler) handleMovePage(s *discordgo.Session, i *discordgo.InteractionCreate, customID string) {
+	var User *discordgo.User
+
+	if i.Member == nil {
+		User = i.User
+	} else {
+		User = i.Member.User
+	}
+
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredMessageUpdate,
 	}); err != nil {
@@ -381,9 +372,9 @@ func (h *InteractionHandler) handleMovePage(s *discordgo.Session, i *discordgo.I
 
 	pageStr := strings.TrimPrefix(customID, chess.PrefixMovePage)
 	page, _ := strconv.Atoi(pageStr)
-	team, _ := h.Game.GetPlayerTeam(i.Member.User.ID)
+	team, _ := h.Game.GetPlayerTeam(User.ID)
 
-	messageToEdit, err := chess.CreatePaginationMessageEdit(h.Game.ChessGame, page, h.Game.GetVotes(), i.Member.User.ID, team)
+	messageToEdit, err := chess.CreatePaginationMessageEdit(h.Game.ChessGame, page, h.Game.GetVotes(), User.ID, team)
 	if err != nil {
 		fmt.Printf("Error creating pagination embed: %v\n", err)
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
@@ -395,6 +386,14 @@ func (h *InteractionHandler) handleMovePage(s *discordgo.Session, i *discordgo.I
 }
 
 func (h *InteractionHandler) handleMoveSelect(s *discordgo.Session, i *discordgo.InteractionCreate, customID string) {
+	var User *discordgo.User
+
+	if i.Member == nil {
+		User = i.User
+	} else {
+		User = i.Member.User
+	}
+
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredMessageUpdate,
 	}); err != nil {
@@ -403,9 +402,9 @@ func (h *InteractionHandler) handleMoveSelect(s *discordgo.Session, i *discordgo
 	}
 
 	moveStr := strings.TrimPrefix(customID, chess.PrefixMoveSelect)
-	team, _ := h.Game.GetPlayerTeam(i.Member.User.ID)
+	team, _ := h.Game.GetPlayerTeam(User.ID)
 
-	messageToEdit, err := chess.CreateMovePreviewEmbed(h.Game.ChessGame, moveStr, i.Member.User.ID, team)
+	messageToEdit, err := chess.CreateMovePreviewEmbed(h.Game.ChessGame, moveStr, User.ID, team)
 	if err != nil {
 		fmt.Printf("Error creating move preview embed: %v\n", err)
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
@@ -417,8 +416,16 @@ func (h *InteractionHandler) handleMoveSelect(s *discordgo.Session, i *discordgo
 }
 
 func (h *InteractionHandler) handleMoveVote(s *discordgo.Session, i *discordgo.InteractionCreate, customID string) {
+	var User *discordgo.User
+
+	if i.Member == nil {
+		User = i.User
+	} else {
+		User = i.Member.User
+	}
+
 	moveStr := strings.TrimPrefix(customID, chess.PrefixMoveVote)
-	err := h.Game.VoteMove(i.Member.User.ID, moveStr)
+	err := h.Game.VoteMove(User.ID, moveStr)
 	if err != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -447,6 +454,14 @@ func (h *InteractionHandler) handleMoveVote(s *discordgo.Session, i *discordgo.I
 }
 
 func (h *InteractionHandler) handleMoveCancel(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	var User *discordgo.User
+
+	if i.Member == nil {
+		User = i.User
+	} else {
+		User = i.Member.User
+	}
+
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredMessageUpdate,
 	}); err != nil {
@@ -454,9 +469,9 @@ func (h *InteractionHandler) handleMoveCancel(s *discordgo.Session, i *discordgo
 		return
 	}
 
-	team, _ := h.Game.GetPlayerTeam(i.Member.User.ID)
+	team, _ := h.Game.GetPlayerTeam(User.ID)
 
-	messageToEdit, err := chess.CreatePaginationMessageEdit(h.Game.ChessGame, 0, h.Game.GetVotes(), i.Member.User.ID, team)
+	messageToEdit, err := chess.CreatePaginationMessageEdit(h.Game.ChessGame, 0, h.Game.GetVotes(), User.ID, team)
 	if err != nil {
 		fmt.Printf("Error creating pagination embed: %v\n", err)
 		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{

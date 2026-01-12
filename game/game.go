@@ -177,7 +177,7 @@ func (game *Game) Next() string {
 			result = "무승부입니다!"
 		}
 		method := game.ChessGame.Method()
-		msg := fmt.Sprintf("게임 종료! %s (%s)\n`/game` 명령어로 새 게임을 시작할 수 있습니다.", result, method.String())
+		msg := fmt.Sprintf("게임 종료! %s (%s)", result, method.String())
 		game.GameOver = true
 		return msg
 	}

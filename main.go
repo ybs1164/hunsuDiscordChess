@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"hunsuChess/bot"
+
 	"hunsuChess/game"
 )
 
@@ -28,10 +29,13 @@ func main() {
 
 func DayCycle(gameInstance *game.Game) {
 	for {
-		now := time.Now().Add(24 * time.Hour)
+		now := time.Now().UTC().Add(24 * time.Hour)
 		year, month, day := now.Date()
 		gameInstance.NextTime = time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 		<-time.After(time.Until(gameInstance.NextTime))
+		if gameInstance.IsGameOver() {
+			gameInstance.Reset()
+		}
 		gameInstance.Next()
 	}
 }
