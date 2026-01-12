@@ -131,7 +131,14 @@ func (h *InteractionHandler) handleGameCommand(s *discordgo.Session, i *discordg
 		minutes := int(duration.Minutes()) % 60
 		seconds := int(duration.Seconds()) % 60
 
-		message = fmt.Sprintf("턴이 넘어갈 때까지 %d시간 %d분 %d초 남았습니다.\n\n%s", hours, minutes, seconds, h.Game.GetTopNVotes(3))
+		var turn string
+		if h.Game.ChessGame.Position().Turn() == notnilchess.White {
+			turn = "백"
+		} else {
+			turn = "흑"
+		}
+
+		message = fmt.Sprintf("%s팀 차례가 넘어갈 때까지 %d시간 %d분 %d초 남았습니다.\n\n%s", turn, hours, minutes, seconds, h.Game.GetTopNVotes(3))
 	}
 
 	var User *discordgo.User
@@ -192,8 +199,13 @@ func (h *InteractionHandler) handleJoinCommand(s *discordgo.Session, i *discordg
 	}
 
 	// As direct Nitro detection (PremiumType) is unreliable, we check for features that require Nitro,
-	// such as server boosting, animated avatar, banner, or avatar decoration.
-	isPremium := User.PremiumType > 0
+	// such as having a user-specific avatar, banner, or accent color.
+	member, err := s.GuildMember(i.GuildID, User.ID)
+	isPremium := User.PremiumType > 0 || User.Banner != "" || User.AccentColor > 0
+
+	if err == nil {
+		isPremium = isPremium || (i.Member != nil && i.Member.PremiumSince != nil) || member.Avatar != ""
+	}
 
 	if isPremium {
 		h.Game.AddWhitePlayer(User.ID)
@@ -201,7 +213,6 @@ func (h *InteractionHandler) handleJoinCommand(s *discordgo.Session, i *discordg
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
 				Content: fmt.Sprintf("%s님이 백팀에 참여했습니다.", User.Username),
-				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
 	} else {
