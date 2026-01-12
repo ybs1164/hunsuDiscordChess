@@ -1,4 +1,4 @@
-package hunsuChess
+package chess
 
 import (
 	"bytes"
@@ -93,7 +93,7 @@ func addLabel(img *image.NRGBA, x, y int, label string, c color.Color) {
 	d.DrawString(label)
 }
 
-func ChessImage(fen string, arrows []string) io.Reader {
+func ChessImage(fen string, arrows []string, team string) io.Reader {
 	width, height := 360, 360
 
 	img := image.NewNRGBA(image.Rect(0, 0, width, height))
@@ -123,28 +123,41 @@ func ChessImage(fen string, arrows []string) io.Reader {
 		} else {
 			c = light
 		}
-		addLabel(img, 2, (9-i)*45-33, strconv.Itoa(i), c)
-		addLabel(img, i*45-8, 358, string(rune(i+'a'-1)), c)
+
+		if team == "black" {
+			addLabel(img, 2, (9-i)*45-33, strconv.Itoa(9-i), c)
+			addLabel(img, i*45-8, 358, string(rune(9-i+'a'-1)), c)
+		} else {
+			addLabel(img, 2, (9-i)*45-33, strconv.Itoa(i), c)
+			addLabel(img, i*45-8, 358, string(rune(i+'a'-1)), c)
+		}
 	}
 
 	file := bytes.NewBuffer([]byte{})
 
-	png.Encode(file, AddArrowsInBoard(img, arrows))
+	png.Encode(file, AddArrowsInBoard(img, arrows, team))
 
 	return file
 }
 
-func GetPosition(position string) (float64, float64) {
-	return float64(position[0] - 'a'), float64(7 - (position[1] - '1'))
+func GetPosition(position string, team string) (float64, float64) {
+	file := float64(position[0] - 'a')
+	rank := float64(7 - (position[1] - '1'))
+
+	if team == "black" {
+		file = 7 - file
+		rank = 7 - rank
+	}
+	return file, rank
 }
 
-func AddArrowsInBoard(img image.Image, arrows []string) image.Image {
+func AddArrowsInBoard(img image.Image, arrows []string, team string) image.Image {
 	board := gg.NewContextForImage(img)
 
 	for _, arrow := range arrows {
 		pre, post := arrow[:2], arrow[2:]
-		preFile, preRank := GetPosition(pre)
-		postFile, postRank := GetPosition(post)
+		preFile, preRank := GetPosition(pre, team)
+		postFile, postRank := GetPosition(post, team)
 
 		preLineX := preFile*45 + 22.5
 		preLineY := preRank*45 + 22.5
