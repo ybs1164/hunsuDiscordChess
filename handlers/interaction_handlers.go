@@ -24,9 +24,17 @@ func (h *InteractionHandler) Handle(s *discordgo.Session, i *discordgo.Interacti
 	case discordgo.InteractionMessageComponent:
 		customID := i.MessageComponentData().CustomID
 		parts := strings.Split(customID, ";")
+		var User *discordgo.User
+
+		if i.Member == nil {
+			User = i.User
+		} else {
+			User = i.Member.User
+		}
+
 		if len(parts) == 2 {
 			authorID := parts[1]
-			if authorID != i.Member.User.ID {
+			if authorID != User.ID {
 				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
@@ -39,7 +47,7 @@ func (h *InteractionHandler) Handle(s *discordgo.Session, i *discordgo.Interacti
 			customID = parts[0]
 		}
 
-		if errMsg := CheckPlayerAndTurn(h.Game, i.Member.User.ID); errMsg != "" {
+		if errMsg := CheckPlayerAndTurn(h.Game, User.ID); errMsg != "" {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
@@ -204,7 +212,7 @@ func (h *InteractionHandler) handleJoinCommand(s *discordgo.Session, i *discordg
 	isPremium := User.PremiumType > 0 || User.Banner != "" || User.AccentColor > 0
 
 	if err == nil {
-		isPremium = isPremium || (i.Member != nil && i.Member.PremiumSince != nil) || member.Avatar != ""
+		isPremium = isPremium || (i.Member != nil && i.Member.PremiumSince != nil) || (member != nil && member.Avatar != "")
 	}
 
 	if isPremium {
